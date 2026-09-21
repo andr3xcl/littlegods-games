@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "lucide-react": "^1.47.0",
+    "electron-updater": "^6.8.9",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "webtorrent": "^3.0.21"
@@ -34,7 +35,6 @@
     "cross-env": "^10.1.0",
     "electron": "^44.4.3",
     "electron-builder": "^26.15.3",
-    "electron-updater": "^6.8.9",
     "oxlint": "^1.81.0",
     "typescript": "~6.0.2",
     "vite": "^8.3.0",
