@@ -1,7 +1,8 @@
-const { app, BrowserWindow, dialog, ipcMain } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
 const { spawn, spawnSync } = require('node:child_process')
+const { autoUpdater } = require('electron-updater')
 let WebTorrent
 
 let mainWindow
@@ -10,7 +11,9 @@ const downloads = new Map()
 const downloadLocations = new Map()
 const torrentHealthMonitors = new Map()
 const downloadsStatePath = path.join(app.getPath('userData'), 'downloads-state.json')
+const approvedFoldersPath = path.join(app.getPath('userData'), 'approved-folders.json')
 const manifestUrl = 'https://files.littlegods.space/manifest_games.txt'
+const catalogOrigin = 'https://files.littlegods.space'
 const officialGames = [
   { id: 't4', name: 'Plutonium T4', genre: 'Zombies / Multiplayer', description: 'La experiencia T4 completa para tu biblioteca.', torrentFile: 'games/torrent/pluto_t4_full_game.torrent', bannerFile: 'games/banner/t4.png' },
   { id: 't5', name: 'Plutonium T5', genre: 'Zombies / Multiplayer', description: 'La experiencia T5 completa para tu biblioteca.', torrentFile: 'games/torrent/pluto_t5_full_game.torrent', bannerFile: 'games/banner/t5.png' },
@@ -21,7 +24,96 @@ function send(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload)
 }
 
+function normalizeFolder(folder) {
+  return path.normalize(path.resolve(folder)).replace(/[\\/]+$/, '').toLowerCase()
+}
+
+function readApprovedFolders() {
+  try {
+    if (!fs.existsSync(approvedFoldersPath)) return []
+    const parsed = JSON.parse(fs.readFileSync(approvedFoldersPath, 'utf8'))
+    return Array.isArray(parsed) ? parsed.filter((folder) => typeof folder === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function approveFolder(folder) {
+  const normalized = normalizeFolder(folder)
+  const folders = new Set(readApprovedFolders().map(normalizeFolder))
+  folders.add(normalized)
+  fs.writeFileSync(approvedFoldersPath, JSON.stringify([...folders], null, 2))
+}
+
+async function validateDownloadDestination(destination) {
+  if (typeof destination !== 'string' || !destination.trim() || destination.includes('\0') || !path.isAbsolute(destination)) {
+    throw new Error('La carpeta de destino debe ser una ruta absoluta valida.')
+  }
+
+  const resolved = path.resolve(destination)
+  const appGames = path.join(app.getPath('userData'), 'games')
+  const approved = readApprovedFolders().map(normalizeFolder)
+  const allowed = normalizeFolder(resolved) === normalizeFolder(appGames)
+    || approved.includes(normalizeFolder(resolved))
+  if (!allowed) throw new Error('Solo puedes usar la carpeta de datos de Littlegods o una carpeta elegida por ti.')
+
+  const stats = await fs.promises.stat(resolved).catch(() => null)
+  if (!stats?.isDirectory()) throw new Error('La carpeta seleccionada ya no existe o no es valida.')
+  return resolved
+}
+
+function manifestEntries(manifest) {
+  return String(manifest).split(/\r?\n/).map((entry) => entry.trim().replace(/^\/+/, '').replace(/\/+$/, '')).filter(Boolean)
+}
+
+function isManifestPathListed(manifest, relativePath) {
+  const normalizedPath = relativePath.replace(/^\/+/, '').replace(/\/+$/, '')
+  return manifestEntries(manifest).some((entry) => entry === normalizedPath || entry.endsWith(`/${normalizedPath}`))
+}
+
+async function getManifestGame(id, torrentUrl) {
+  const game = officialGames.find((item) => item.id === id)
+  if (!game) throw new Error('Este juego no pertenece al catálogo oficial.')
+
+  let parsedUrl
+  try {
+    parsedUrl = new URL(torrentUrl)
+  } catch {
+    throw new Error('La ruta del torrent no es valida.')
+  }
+  if (parsedUrl.origin !== catalogOrigin || parsedUrl.pathname.replace(/^\/+/, '') !== game.torrentFile) {
+    throw new Error('La ruta del torrent no coincide con la ruta oficial del proyecto.')
+  }
+
+  const response = await fetch(manifestUrl)
+  if (!response.ok) throw new Error(`No se pudo verificar el manifest (${response.status}).`)
+  const manifest = await response.text()
+  if (!isManifestPathListed(manifest, game.torrentFile)) {
+    throw new Error('Este juego no esta habilitado en el manifest oficial.')
+  }
+  return game
+}
+
+function configureAutoUpdater() {
+  if (!app.isPackaged) return
+
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.on('checking-for-update', () => send('update:status', { state: 'checking' }))
+  autoUpdater.on('update-available', (info) => send('update:status', { state: 'available', version: info.version }))
+  autoUpdater.on('download-progress', (info) => send('update:status', { state: 'downloading', percent: info.percent }))
+  autoUpdater.on('update-downloaded', (info) => send('update:status', { state: 'downloaded', version: info.version }))
+  autoUpdater.on('error', (error) => send('update:status', { state: 'error', message: error.message }))
+  autoUpdater.checkForUpdatesAndNotify().catch((error) => {
+    console.warn('No se pudo comprobar si hay actualizaciones:', error.message)
+  })
+}
+
 async function downloadTorrentFile(id, torrentUrl) {
+  const parsedUrl = new URL(torrentUrl)
+  if (parsedUrl.origin !== catalogOrigin || !officialGames.some((game) => new URL(game.torrentFile, catalogOrigin).toString() === parsedUrl.toString())) {
+    throw new Error('El archivo .torrent no pertenece al catálogo oficial.')
+  }
   send('torrent:log', { id, message: 'Descargando archivo .torrent desde el catálogo oficial...' })
   const response = await fetch(torrentUrl)
   if (!response.ok) throw new Error(`No se pudo descargar el torrent (${response.status}).`)
@@ -71,6 +163,15 @@ function getTorrentControlPath(id) {
   return path.join(app.getPath('userData'), 'torrent-controls', `${id}.pause`)
 }
 
+function getDefaultGamesPath() {
+  return process.platform === 'win32' ? path.join('C:', 'games') : path.join(app.getPath('userData'), 'games')
+}
+
+function canDeleteGameDestination(destination, id) {
+  if (!destination || !id) return false
+  return path.basename(path.resolve(destination)).toLowerCase() === String(id).toLowerCase()
+}
+
 async function clearTorrentPause(id) {
   await fs.promises.unlink(getTorrentControlPath(id)).catch(() => {})
 }
@@ -111,10 +212,15 @@ function findPythonExecutable() {
 function parseProgressLine(line) {
   const trimmed = String(line).trim()
   if (!trimmed) return null
-  const progressMatch = trimmed.match(/Progreso:\s*([0-9.]+)%\s*\|\s*Velocidad:\s*([0-9.]+)\s*KiB\/s/i)
+  const nativeProgressMatch = trimmed.match(/^__PROGRESS__:\s*([0-9.]+):([0-9.]+):(\d+):(\d+):(\d+)$/)
+  if (nativeProgressMatch) {
+    const [, progress, speed, downloaded, total, peers] = nativeProgressMatch
+    return { progress: Number(progress) / 100, speed: Number(speed) * 1024, downloaded: Number(downloaded), total: Number(total), peers: Number(peers) }
+  }
+  const progressMatch = trimmed.match(/Progreso:\s*([0-9.]+)%\s*\|\s*Velocidad:\s*([0-9.]+)\s*KiB\/s\s*\|\s*Descargado:\s*(\d+)\s*B\s*\|\s*Total:\s*(\d+)\s*B\s*\|\s*Pares:\s*(\d+)/i)
   if (progressMatch) {
-    const [, progress, speed] = progressMatch
-    return { progress: Number(progress) / 100, speed: Number(speed) * 1024 }
+    const [, progress, speed, downloaded, total, peers] = progressMatch
+    return { progress: Number(progress) / 100, speed: Number(speed) * 1024, downloaded: Number(downloaded), total: Number(total), peers: Number(peers) }
   }
   return null
 }
@@ -162,7 +268,7 @@ function startNativeTorrentDownload(id, torrentPath, destination) {
     for (const line of lines) {
       const parsed = parseProgressLine(line)
       if (parsed) {
-        send('torrent:progress', { id, progress: parsed.progress, speed: parsed.speed, peers: 1, downloaded: Math.max(parsed.progress, 0) * 100, total: 100 })
+        send('torrent:progress', { id, ...parsed })
         continue
       }
       if (line.includes('__RESULT__')) {
@@ -286,7 +392,7 @@ async function restorePersistedDownloads() {
       downloads.set(entry.id, { kind: 'native', process, path: entry.destination, completed: false, paused: Boolean(entry.paused) })
       downloadLocations.set(entry.id, entry.destination)
       send('torrent:prepared', { id: entry.id, destination: entry.destination })
-      send('torrent:progress', { id: entry.id, progress: 0, speed: 0, peers: 0, downloaded: 0, total: 100 })
+      send('torrent:progress', { id: entry.id, progress: 0, speed: 0, peers: 0, downloaded: 0, total: 0 })
     }
   } catch (error) {
     console.error('Error restoring active downloads:', error)
@@ -314,10 +420,12 @@ function createWindow() {
 
 function registerIpc() {
   ipcMain.handle('games:list', async () => {
-    const manifest = await fetch(manifestUrl).then((response) => response.text())
+    const response = await fetch(manifestUrl)
+    if (!response.ok) throw new Error(`No se pudo leer el manifest (${response.status}).`)
+    const manifest = await response.text()
     return officialGames
-      .filter((game) => manifest.includes(game.torrentFile))
-      .map((game) => ({ ...game, torrentPath: new URL(game.torrentFile, 'https://files.littlegods.space/').toString(), bannerUrl: new URL(game.bannerFile, 'https://files.littlegods.space/').toString() }))
+      .filter((game) => isManifestPathListed(manifest, game.torrentFile))
+      .map((game) => ({ ...game, torrentPath: new URL(game.torrentFile, catalogOrigin).toString(), bannerUrl: new URL(game.bannerFile, catalogOrigin).toString() }))
   })
   ipcMain.handle('torrent:pick', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
@@ -329,10 +437,46 @@ function registerIpc() {
   })
   ipcMain.handle('folder:pick', async () => {
     const result = await dialog.showOpenDialog(mainWindow, { title: 'Carpeta de juegos', properties: ['openDirectory', 'createDirectory'] })
-    return result.canceled ? null : result.filePaths[0]
+    if (result.canceled) return null
+    approveFolder(result.filePaths[0])
+    return result.filePaths[0]
+  })
+  ipcMain.handle('folder:default', async () => {
+    const defaultPath = getDefaultGamesPath()
+    await fs.promises.mkdir(defaultPath, { recursive: true })
+    approveFolder(defaultPath)
+    return defaultPath
+  })
+  ipcMain.handle('folder:open', async (_event, folderPath) => {
+    if (!folderPath || typeof folderPath !== 'string') return false
+    const error = await shell.openPath(folderPath)
+    return !error
+  })
+  ipcMain.handle('folder:exists', async (_event, folderPath) => {
+    if (!folderPath || typeof folderPath !== 'string' || !path.isAbsolute(folderPath)) return false
+    const stats = await fs.promises.stat(folderPath).catch(() => null)
+    return Boolean(stats?.isDirectory())
   })
   ipcMain.handle('torrent:start', async (_event, { id, torrentPath, destination }) => {
-    const gameDestination = destination || path.join(app.getPath('userData'), 'games')
+    let baseDestination
+    try {
+      const requestedDestination = destination || getDefaultGamesPath()
+      if (!destination) await fs.promises.mkdir(requestedDestination, { recursive: true })
+      baseDestination = await validateDownloadDestination(requestedDestination)
+      await getManifestGame(id, torrentPath)
+    } catch (error) {
+      const message = error.message || 'La descarga fue bloqueada por seguridad.'
+      send('torrent:error', { id, message })
+      return { ok: false, message }
+    }
+
+    const gameDestination = baseDestination
+    const existingGamePath = await fs.promises.lstat(gameDestination).catch(() => null)
+    if (existingGamePath?.isSymbolicLink()) {
+      const message = 'La carpeta del juego no puede ser un enlace o una ruta redirigida.'
+      send('torrent:error', { id, message })
+      return { ok: false, message }
+    }
     const localTorrentPath = await downloadTorrentFile(id, torrentPath).catch((error) => ({ error }))
     if (localTorrentPath.error) {
       send('torrent:error', { id, message: localTorrentPath.error.message })
@@ -351,7 +495,7 @@ function registerIpc() {
       downloads.set(id, { kind: 'native', process: child, path: gameDestination, completed: false, paused: false })
       downloadLocations.set(id, gameDestination)
       send('torrent:log', { id, message: `Descarga nativa iniciada en: ${gameDestination}` })
-      send('torrent:progress', { id, progress: 0, speed: 0, peers: 1, downloaded: 0, total: 100 })
+      send('torrent:progress', { id, progress: 0, speed: 0, peers: 0, downloaded: 0, total: 0 })
       return { ok: true }
     } catch (error) {
       const message = `No se pudo iniciar la descarga nativa: ${error.message}`
@@ -404,7 +548,11 @@ function registerIpc() {
       await clearTorrentPause(id)
       const torrentPath = path.join(app.getPath('userData'), 'torrents', `${id}.torrent`)
       await fs.promises.unlink(torrentPath).catch(() => {})
-      if (destination) await fs.promises.rm(destination, { recursive: true, force: true })
+      if (canDeleteGameDestination(destination, id)) {
+        await fs.promises.rm(destination, { recursive: true, force: true })
+      } else if (destination) {
+        console.warn(`Se conserva la carpeta padre; ruta no eliminada para ${id}: ${destination}`)
+      }
     } catch (error) {
       console.error('Failed deleting torrent download', error)
     }
@@ -417,6 +565,7 @@ function registerIpc() {
 app.whenReady().then(() => {
   registerIpc()
   createWindow()
+  configureAutoUpdater()
   restorePersistedDownloads()
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 })

@@ -5,6 +5,9 @@ contextBridge.exposeInMainWorld('launcher', {
   addGame: (game) => ipcRenderer.invoke('games:add', game),
   pickTorrent: () => ipcRenderer.invoke('torrent:pick'),
   pickFolder: () => ipcRenderer.invoke('folder:pick'),
+  defaultFolder: () => ipcRenderer.invoke('folder:default'),
+  openFolder: (folderPath) => ipcRenderer.invoke('folder:open', folderPath),
+  folderExists: (folderPath) => ipcRenderer.invoke('folder:exists', folderPath),
   startDownload: (payload) => ipcRenderer.invoke('torrent:start', payload),
   pauseDownload: (id) => ipcRenderer.invoke('torrent:pause', id),
   resumeDownload: (id) => ipcRenderer.invoke('torrent:resume', id),
@@ -18,4 +21,5 @@ contextBridge.exposeInMainWorld('launcher', {
   onCancelled: (callback) => ipcRenderer.on('torrent:cancelled', (_event, payload) => callback(payload)),
   onPaused: (callback) => ipcRenderer.on('torrent:paused', (_event, payload) => callback(payload)),
   onResumed: (callback) => ipcRenderer.on('torrent:resumed', (_event, payload) => callback(payload)),
+  onUpdateStatus: (callback) => ipcRenderer.on('update:status', (_event, payload) => callback(payload)),
 })

@@ -22,6 +22,9 @@ declare global {
       listGames: () => Promise<Game[]>
       pickTorrent: () => Promise<string | null>
       pickFolder: () => Promise<string | null>
+      defaultFolder: () => Promise<string>
+      openFolder: (folderPath: string) => Promise<boolean>
+      folderExists: (folderPath: string) => Promise<boolean>
       startDownload: (payload: { id: string; torrentPath: string; destination: string }) => Promise<{ ok: boolean; message?: string }>
       pauseDownload: (id: string) => Promise<boolean>
       resumeDownload: (id: string) => Promise<boolean>
@@ -35,6 +38,7 @@ declare global {
       onCancelled: (callback: (payload: { id: string }) => void) => void
       onPaused: (callback: (payload: { id: string }) => void) => void
       onResumed: (callback: (payload: { id: string }) => void) => void
+      onUpdateStatus: (callback: (payload: { state: string; version?: string; percent?: number; message?: string }) => void) => void
     }
   }
 }
