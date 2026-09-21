@@ -1,0 +1,21 @@
+const { contextBridge, ipcRenderer } = require('electron')
+
+contextBridge.exposeInMainWorld('launcher', {
+  listGames: () => ipcRenderer.invoke('games:list'),
+  addGame: (game) => ipcRenderer.invoke('games:add', game),
+  pickTorrent: () => ipcRenderer.invoke('torrent:pick'),
+  pickFolder: () => ipcRenderer.invoke('folder:pick'),
+  startDownload: (payload) => ipcRenderer.invoke('torrent:start', payload),
+  pauseDownload: (id) => ipcRenderer.invoke('torrent:pause', id),
+  resumeDownload: (id) => ipcRenderer.invoke('torrent:resume', id),
+  cancelDownload: (id) => ipcRenderer.invoke('torrent:cancel', id),
+  deleteDownload: (id) => ipcRenderer.invoke('torrent:delete', id),
+  onProgress: (callback) => ipcRenderer.on('torrent:progress', (_event, payload) => callback(payload)),
+  onLog: (callback) => ipcRenderer.on('torrent:log', (_event, payload) => callback(payload)),
+  onPrepared: (callback) => ipcRenderer.on('torrent:prepared', (_event, payload) => callback(payload)),
+  onDone: (callback) => ipcRenderer.on('torrent:done', (_event, payload) => callback(payload)),
+  onError: (callback) => ipcRenderer.on('torrent:error', (_event, payload) => callback(payload)),
+  onCancelled: (callback) => ipcRenderer.on('torrent:cancelled', (_event, payload) => callback(payload)),
+  onPaused: (callback) => ipcRenderer.on('torrent:paused', (_event, payload) => callback(payload)),
+  onResumed: (callback) => ipcRenderer.on('torrent:resumed', (_event, payload) => callback(payload)),
+})
