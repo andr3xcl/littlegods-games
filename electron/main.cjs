@@ -407,6 +407,7 @@ function createWindow() {
     minHeight: 680,
     backgroundColor: '#0b0f16',
     title: 'Littlegods Games',
+    icon: path.join(__dirname, '..', 'public', 'imagen', 'littlegods.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,

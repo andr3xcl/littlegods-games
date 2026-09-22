@@ -48,8 +48,10 @@
     "files": [
       "build/renderer/**/*",
       "electron/**/*",
+      "public/imagen/littlegods.*",
       "package.json"
     ],
+    "icon": "public/imagen/littlegods.ico",
     "win": {
       "target": "nsis"
     },
