@@ -48,18 +48,17 @@
     "files": [
       "build/renderer/**/*",
       "electron/**/*",
-      "public/imagen/littlegods.*",
       "package.json"
     ],
-    "icon": "public/imagen/littlegods.ico",
+    "icon": "build/renderer/imagen/littlegods.png",
     "win": {
       "target": "nsis",
-      "icon": "public/imagen/littlegods.ico"
+      "icon": "build/renderer/imagen/littlegods.ico"
     },
     "linux": {
       "target": "AppImage",
       "category": "Game",
-      "icon": "public/imagen/littlegods.png"
+      "icon": "build/renderer/imagen/littlegods.png"
     },
     "publish": {
       "provider": "github",
