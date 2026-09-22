@@ -105,7 +105,7 @@ function configureAutoUpdater() {
   autoUpdater.on('update-downloaded', (info) => send('update:status', { state: 'downloaded', version: info.version }))
   autoUpdater.on('error', (error) => send('update:status', { state: 'error', message: error.message }))
   autoUpdater.checkForUpdatesAndNotify().catch((error) => {
-    console.warn('No se pudo comprobar si hay actualizaciones:', error.message)
+    if (!error.message.includes('No published versions')) console.warn('No se pudo comprobar si hay actualizaciones:', error.message)
   })
 }
 
@@ -416,7 +416,7 @@ function createWindow() {
   })
 
   if (process.env.VITE_DEV_SERVER_URL) mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
-  else mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
+  else mainWindow.loadFile(path.join(__dirname, '..', 'build', 'renderer', 'index.html'))
 }
 
 function registerIpc() {
