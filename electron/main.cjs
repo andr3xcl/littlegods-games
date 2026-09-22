@@ -225,19 +225,25 @@ function parseProgressLine(line) {
   return null
 }
 
+function getNativeRuntimePath() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'native')
+    : path.join(__dirname, '..', 'native')
+}
+
 function startNativeTorrentDownload(id, torrentPath, destination) {
   const pythonExec = findPythonExecutable()
   if (!pythonExec) {
     throw new Error('No se encontro Python para iniciar la descarga nativa.')
   }
 
-  const rootDir = path.resolve(__dirname, '..', '..')
+  const rootDir = getNativeRuntimePath()
   const script = [
     'import json, sys, os, traceback',
     `root = ${JSON.stringify(rootDir)}`,
     'if root not in sys.path: sys.path.insert(0, root)',
     'try:',
-    '    from src.torrent_service import add_torrent',
+    '    from torrent_service import add_torrent',
     '    def emit(message):',
     '        print(message, flush=True)',
     '    result = add_torrent(sys.argv[1], sys.argv[2], emit, None, sys.argv[3])',
