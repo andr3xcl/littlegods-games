@@ -46,7 +46,7 @@ def add_torrent(
         if on_output:
             on_output(f"Descarga iniciada sin limite en: {destination}")
 
-        while not handle.is_seed():
+        while not handle.status().is_seeding:
             should_pause = control is not None and control.exists()
             if should_pause and not paused:
                 handle.pause()
