@@ -53,11 +53,13 @@
     ],
     "icon": "public/imagen/littlegods.ico",
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "public/imagen/littlegods.ico"
     },
     "linux": {
       "target": "AppImage",
-      "category": "Game"
+      "category": "Game",
+      "icon": "public/imagen/littlegods.png"
     },
     "publish": {
       "provider": "github",
